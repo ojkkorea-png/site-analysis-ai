@@ -12,7 +12,7 @@ from streamlit_folium import st_folium
 
 from modules.api_clients import ApiError, KakaoLocalClient, OpenMeteoClient, OpenStreetMapClient, SgisClient, VWorldDataClient
 from modules.environment_analysis import analyze_sun, summarize_climate
-from modules.geo_utils import bbox_from_radius, sgis_adm_cd_from_findcode
+from modules.geo_utils import sgis_adm_cd_from_findcode
 from modules.report_generator import render_html_report
 from modules.site_analysis import create_site_analysis
 
@@ -29,16 +29,6 @@ PLACE_CATEGORIES = {
     "편의점": "CS2",
     "병원": "HP8",
 }
-
-VWORLD_LAYERS = {
-    "연속지적도": "LP_PA_CBND_BUBUN",
-    "도시지역": "LT_C_UQ111",
-    "관리지역": "LT_C_UQ112",
-    "경관지구": "LT_C_UQ121",
-    "고도지구": "LT_C_UQ123",
-    "방화지구": "LT_C_UQ124",
-}
-
 
 def inject_styles() -> None:
     st.markdown(
@@ -296,7 +286,7 @@ def render_overview(analysis) -> None:
     metric_cols = st.columns(4)
     metric_cols[0].metric("분석 반경", f"{analysis.radius}m")
     metric_cols[1].metric("주변 장소", f"{sum(analysis.place_counts.values())}건")
-    metric_cols[2].metric("공간 레이어", f"{len(analysis.spatial_layer_counts)}개")
+    metric_cols[2].metric("후보 비교", "자동 생성")
     metric_cols[3].metric("설계 키워드", f"{len(analysis.design_keywords)}개")
 
     address_col, region_col = st.columns(2)
@@ -368,16 +358,6 @@ def render_movement_diagram(places_rows: list[dict], lat: float, lon: float) -> 
             st.dataframe(compact, width="stretch", hide_index=True, height=260)
     else:
         st.caption("조회된 주변 장소가 없습니다.")
-
-
-def render_spatial_layers(analysis) -> None:
-    st.subheader("공간정보")
-    if analysis.spatial_layer_counts:
-        cols = st.columns(min(len(analysis.spatial_layer_counts), 4))
-        for idx, (key, value) in enumerate(analysis.spatial_layer_counts.items()):
-            cols[idx % len(cols)].metric(key, f"{value}건" if isinstance(value, int) else str(value))
-    else:
-        st.caption("조회된 공간정보 레이어가 없습니다.")
 
 
 def render_comparison(comparison_rows: list[dict]) -> None:
@@ -630,11 +610,6 @@ def main() -> None:
             list(PLACE_CATEGORIES),
             default=["대중교통", "카페", "문화시설", "음식점"],
         )
-        selected_layers = st.multiselect(
-            "공간정보 레이어",
-            list(VWORLD_LAYERS),
-            default=["연속지적도", "도시지역"],
-        )
         include_sun = st.checkbox("일조 분석 포함", value=True)
         include_climate = st.checkbox("기후 요약 포함", value=True)
         climate_year = st.number_input("기후 기준 연도", min_value=2017, max_value=date.today().year - 1, value=date.today().year - 1)
@@ -753,15 +728,6 @@ def main() -> None:
                 except ApiError as exc:
                     collection_notes.append(f"SGIS 인구 통계 조회 실패: {exc}")
 
-            if vworld.enabled:
-                bbox = bbox_from_radius(lon, lat, min(radius, 700))
-                for label in selected_layers:
-                    try:
-                        vworld_responses[label] = vworld.get_features(VWORLD_LAYERS[label], bbox)
-                    except ApiError as exc:
-                        vworld_responses[label] = None
-                        collection_notes.append(f"{label} 공간정보 조회 실패: {exc}")
-
             if include_climate:
                 try:
                     climate_response = meteo.daily_history(
@@ -778,7 +744,6 @@ def main() -> None:
                 base_lat=lat,
                 base_lon=lon,
                 base_places=places_rows,
-                base_layers=vworld_responses,
                 candidate_text=candidate_text,
                 auto_candidates=auto_candidates,
                 auto_candidate_count=auto_candidate_count,
@@ -853,9 +818,6 @@ def main() -> None:
     st.divider()
     render_comparison(comparison_rows)
 
-    st.divider()
-    render_spatial_layers(analysis)
-
     html_report = render_html_report(analysis, comparison_rows)
     export_col1, export_col2, export_col3 = st.columns(3)
     with export_col1:
@@ -893,7 +855,6 @@ def main() -> None:
                 "address": address_response,
                 "region": region_response,
                 "population": population_response,
-                "spatial_layers": analysis.spatial_layer_counts,
                 "climate": climate_response,
             }
         )
@@ -1335,7 +1296,6 @@ def build_comparison_rows(
     base_lat: float,
     base_lon: float,
     base_places: list[dict],
-    base_layers: dict[str, dict | None],
     candidate_text: str,
     auto_candidates: bool,
     auto_candidate_count: int,
@@ -1352,7 +1312,6 @@ def build_comparison_rows(
             lat=base_lat,
             lon=base_lon,
             places=base_places,
-            layer_count=sum(1 for response in base_layers.values() if response),
             radius=radius,
             candidate_type="기준 대지",
         )
@@ -1381,7 +1340,6 @@ def build_comparison_rows(
                 lat=lat,
                 lon=lon,
                 places=candidate_places,
-                layer_count=0,
                 radius=radius,
                 candidate_type=infer_candidate_type(name, candidate_places),
             )
@@ -1579,7 +1537,6 @@ def make_comparison_row(
     lat: float,
     lon: float,
     places: list[dict],
-    layer_count: int,
     radius: int,
     candidate_type: str,
 ) -> dict:
@@ -1610,7 +1567,6 @@ def make_comparison_row(
         "경도": round(lon, 7),
         "유형": candidate_type,
         "주변장소": len(places),
-        "공간레이어": layer_count,
         "접근성": transit_score,
         "상권성": commerce_score,
         "문화성": culture_score,
@@ -1805,7 +1761,6 @@ def analysis_to_json(analysis, places_rows: list[dict], comparison_rows: list[di
         },
         "place_counts": analysis.place_counts,
         "nearest_places": analysis.nearest_places,
-        "spatial_layer_counts": analysis.spatial_layer_counts,
         "population_summary": analysis.population_summary,
         "sun_analysis": serialize_sun_analysis(analysis.sun_analysis),
         "climate_summary": serialize_climate_summary(analysis.climate_summary),

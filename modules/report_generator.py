@@ -65,9 +65,6 @@ def render_html_report(analysis: SiteAnalysis, comparison_rows: list[dict[str, A
   <h2>인구 요약</h2>
   {render_population_table(analysis.population_summary)}
 
-  <h2>공간정보 레이어 조회 결과</h2>
-  {render_key_value_table(analysis.spatial_layer_counts)}
-
   <h2>후보지 비교</h2>
   {render_comparison_table(comparison_rows or [])}
 </body>
