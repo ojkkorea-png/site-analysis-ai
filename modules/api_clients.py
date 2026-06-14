@@ -11,8 +11,11 @@ class ApiError(RuntimeError):
 
 
 def _get_json(url: str, *, headers: dict[str, str] | None = None, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    request_headers = {"User-Agent": "site-analysis-assistant/1.0"}
+    if headers:
+        request_headers.update(headers)
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
+        response = requests.get(url, headers=request_headers, params=params, timeout=15)
     except requests.RequestException as exc:
         raise ApiError(f"Request failed: {exc}") from exc
     if not response.ok:
@@ -223,48 +226,54 @@ class VWorldDataClient:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
         for keyword in self.PLACE_KEYWORDS.get(category_label, [category_label]):
-            data = _get_json(
-                "https://api.vworld.kr/req/search",
-                params={
-                    "service": "search",
-                    "request": "search",
-                    "version": "2.0",
-                    "crs": "EPSG:4326",
-                    "bbox": f"{min_lon},{min_lat},{max_lon},{max_lat}",
-                    "size": min(size, 10),
-                    "page": 1,
-                    "query": keyword,
-                    "type": "place",
-                    "format": "json",
-                    "key": self.api_key,
-                },
-            )
-            items = (((data.get("response") or {}).get("result") or {}).get("items") or [])
-            for item in items:
-                item_id = str(item.get("id") or item.get("title") or item)
-                if item_id in seen:
-                    continue
-                seen.add(item_id)
-                point = item.get("point") or {}
-                item_lon = point.get("x")
-                item_lat = point.get("y")
-                if item_lon is None or item_lat is None:
-                    continue
-                address = item.get("address") or {}
-                rows.append(
-                    {
-                        "analysis_category": category_label,
-                        "place_name": _strip_tags(str(item.get("title") or keyword)),
-                        "distance": str(int(_haversine_m(lat, lon, float(item_lat), float(item_lon)))),
-                        "road_address_name": address.get("road") or address.get("parcel") or "",
-                        "address_name": address.get("parcel") or address.get("road") or "",
-                        "category_name": f"브이월드 검색 > {keyword}",
-                        "x": str(item_lon),
-                        "y": str(item_lat),
-                        "place_url": "",
-                    }
+            page_size = min(size, 10)
+            for page in range(1, 4):
+                data = _get_json(
+                    "https://api.vworld.kr/req/search",
+                    params={
+                        "service": "search",
+                        "request": "search",
+                        "version": "2.0",
+                        "crs": "EPSG:4326",
+                        "bbox": f"{min_lon},{min_lat},{max_lon},{max_lat}",
+                        "size": page_size,
+                        "page": page,
+                        "query": keyword,
+                        "type": "place",
+                        "format": "json",
+                        "key": self.api_key,
+                    },
                 )
-                if len(rows) >= size:
+                items = (((data.get("response") or {}).get("result") or {}).get("items") or [])
+                if not items:
+                    break
+                for item in items:
+                    item_id = str(item.get("id") or item.get("title") or item)
+                    if item_id in seen:
+                        continue
+                    seen.add(item_id)
+                    point = item.get("point") or {}
+                    item_lon = point.get("x")
+                    item_lat = point.get("y")
+                    if item_lon is None or item_lat is None:
+                        continue
+                    address = item.get("address") or {}
+                    rows.append(
+                        {
+                            "analysis_category": category_label,
+                            "place_name": _strip_tags(str(item.get("title") or keyword)),
+                            "distance": str(int(_haversine_m(lat, lon, float(item_lat), float(item_lon)))),
+                            "road_address_name": address.get("road") or address.get("parcel") or "",
+                            "address_name": address.get("parcel") or address.get("road") or "",
+                            "category_name": f"브이월드 검색 > {keyword}",
+                            "x": str(item_lon),
+                            "y": str(item_lat),
+                            "place_url": "",
+                        }
+                    )
+                    if len(rows) >= size:
+                        break
+                if len(rows) >= size or len(items) < page_size:
                     break
             if len(rows) >= size:
                 break
