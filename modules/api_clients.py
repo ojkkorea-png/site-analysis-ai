@@ -145,22 +145,38 @@ class VWorldDataClient:
     def coord_to_address_and_region(self, lon: float, lat: float) -> tuple[dict[str, Any], dict[str, Any]]:
         if not self.api_key:
             raise ApiError("VWORLD_API_KEY is missing.")
-        data = _get_json(
-            "https://api.vworld.kr/req/address",
-            params={
-                "service": "address",
-                "request": "getAddress",
-                "version": "2.0",
-                "key": self.api_key,
-                "format": "json",
-                "crs": "epsg:4326",
-                "point": f"{lon},{lat}",
-                "type": "both",
-            },
-        )
-        response = data.get("response") or {}
+        errors = []
+        data = None
+        for domain in self._domain_candidates():
+            data = _get_json(
+                "https://api.vworld.kr/req/address",
+                params={
+                    "service": "address",
+                    "request": "getAddress",
+                    "version": "2.0",
+                    "key": self.api_key,
+                    "domain": domain,
+                    "format": "json",
+                    "crs": "epsg:4326",
+                    "point": f"{lon},{lat}",
+                    "type": "both",
+                },
+            )
+            response = data.get("response") or {}
+            if response.get("status") == "OK":
+                self.domain = domain
+                break
+            error = response.get("error") or response
+            errors.append(f"{domain}: {error}")
+            code = error.get("code") if isinstance(error, dict) else None
+            if code != "INCORRECT_KEY":
+                break
+        else:
+            response = {}
+
+        response = (data or {}).get("response") or {}
         if response.get("status") != "OK":
-            raise ApiError(f"VWorld reverse geocode failed: {response}")
+            raise ApiError("VWorld reverse geocode failed. " + " | ".join(errors))
 
         results = response.get("result") or []
         road = next((item for item in results if item.get("type") == "road"), None)
@@ -271,6 +287,60 @@ class OpenStreetMapClient:
     @property
     def enabled(self) -> bool:
         return True
+
+    def reverse_geocode(self, lon: float, lat: float) -> tuple[dict[str, Any], dict[str, Any]]:
+        data = _get_json(
+            "https://nominatim.openstreetmap.org/reverse",
+            headers={"User-Agent": "site-analysis-ai/1.0"},
+            params={
+                "format": "jsonv2",
+                "lat": lat,
+                "lon": lon,
+                "zoom": 18,
+                "addressdetails": 1,
+                "accept-language": "ko,en",
+            },
+        )
+        address = data.get("address") or {}
+        road_parts = [
+            address.get("road") or address.get("pedestrian") or address.get("footway"),
+            address.get("house_number"),
+        ]
+        region_1 = address.get("province") or address.get("city") or address.get("state")
+        region_2 = address.get("borough") or address.get("county") or address.get("city_district")
+        region_3 = address.get("suburb") or address.get("quarter") or address.get("neighbourhood")
+        display_name = data.get("display_name") or "주소 정보 없음"
+        road_name = " ".join(str(part) for part in road_parts if part) or display_name
+        address_response = {
+            "documents": [
+                {
+                    "address_name": display_name,
+                    "address": {
+                        "address_name": display_name,
+                        "region_1depth_name": region_1,
+                        "region_2depth_name": region_2,
+                        "region_3depth_name": region_3,
+                    },
+                    "road_address": {
+                        "address_name": road_name,
+                        "region_1depth_name": region_1,
+                        "region_2depth_name": region_2,
+                        "region_3depth_name": region_3,
+                    },
+                }
+            ]
+        }
+        region_response = {
+            "documents": [
+                {
+                    "region_type": "B",
+                    "region_1depth_name": region_1,
+                    "region_2depth_name": region_2,
+                    "region_3depth_name": region_3,
+                }
+            ]
+        }
+        return address_response, region_response
 
     def category_search(self, lon: float, lat: float, category_label: str, radius: int = 500, size: int = 15) -> dict[str, Any]:
         filters = self.CATEGORY_FILTERS.get(category_label)

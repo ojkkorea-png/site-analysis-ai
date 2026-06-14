@@ -691,6 +691,13 @@ def main() -> None:
                 except ApiError as exc:
                     collection_notes.append(f"카카오 주소 보조 조회 실패: {format_api_error(exc)}")
 
+            if not address_response:
+                try:
+                    address_response, region_response = osm.reverse_geocode(lon, lat)
+                    collection_notes.append("주소/행정구역: OpenStreetMap 보조 조회 사용")
+                except ApiError as exc:
+                    collection_notes.append(f"OpenStreetMap 주소 보조 조회 실패: {exc}")
+
             for label in selected_categories:
                 docs: list[dict] = []
                 if vworld.enabled:
