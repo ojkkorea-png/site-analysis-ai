@@ -85,7 +85,7 @@ class VWorldDataClient:
         if not self.api_key:
             raise ApiError("VWORLD_API_KEY is missing.")
         min_lon, min_lat, max_lon, max_lat = bbox
-        return _get_json(
+        data = _get_json(
             "https://api.vworld.kr/req/data",
             params={
                 "service": "data",
@@ -100,6 +100,11 @@ class VWorldDataClient:
                 "size": size,
             },
         )
+        response = data.get("response") or {}
+        if response.get("status") == "ERROR":
+            error = response.get("error") or {}
+            raise ApiError(f"VWorld data API failed: {error.get('code', 'ERROR')} - {error.get('text', response)}")
+        return data
 
     def coord_to_address_and_region(self, lon: float, lat: float) -> tuple[dict[str, Any], dict[str, Any]]:
         if not self.api_key:
