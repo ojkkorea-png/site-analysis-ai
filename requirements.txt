@@ -5,3 +5,4 @@ folium>=0.17
 streamlit-folium>=0.22
 pandas>=2.2
 matplotlib>=3.8
+koreanize-matplotlib>=0.1.1

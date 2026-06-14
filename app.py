@@ -223,6 +223,11 @@ def inject_styles() -> None:
 
 
 def configure_chart_font() -> None:
+    try:
+        import koreanize_matplotlib  # noqa: F401
+    except ImportError:
+        pass
+
     font_candidates = ["Malgun Gothic", "AppleGothic", "Noto Sans CJK KR", "NanumGothic"]
     available_fonts = {font.name for font in font_manager.fontManager.ttflist}
     for font_name in font_candidates:
@@ -645,6 +650,7 @@ def main() -> None:
 
         with st.expander("데이터 소스 상태"):
             st.write(f"브이월드: {'연결 가능' if vworld.enabled else '키 필요'}")
+            st.write(f"브이월드 도메인: {vworld.domain}")
             st.write(f"SGIS 인구 통계: {'연결 가능' if sgis.enabled else '키 필요'}")
             st.write("Open-Meteo 기후: 키 없이 사용")
 

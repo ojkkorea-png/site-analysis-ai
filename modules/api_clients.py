@@ -1,6 +1,7 @@
 import os
 from math import asin, cos, radians, sin, sqrt
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -75,7 +76,7 @@ class VWorldDataClient:
 
     def __init__(self, api_key: str | None = None, domain: str | None = None) -> None:
         self.api_key = api_key or os.getenv("VWORLD_API_KEY")
-        self.domain = domain or os.getenv("VWORLD_DOMAIN", "http://localhost:8501")
+        self.domain = domain or os.getenv("VWORLD_DOMAIN") or self._default_domain()
 
     @property
     def enabled(self) -> bool:
@@ -85,26 +86,61 @@ class VWorldDataClient:
         if not self.api_key:
             raise ApiError("VWORLD_API_KEY is missing.")
         min_lon, min_lat, max_lon, max_lat = bbox
-        data = _get_json(
-            "https://api.vworld.kr/req/data",
-            params={
-                "service": "data",
-                "version": "2.0",
-                "request": "GetFeature",
-                "key": self.api_key,
-                "domain": self.domain,
-                "format": "json",
-                "data": data_id,
-                "geomFilter": f"BOX({min_lon},{min_lat},{max_lon},{max_lat})",
-                "crs": "EPSG:4326",
-                "size": size,
-            },
-        )
-        response = data.get("response") or {}
-        if response.get("status") == "ERROR":
+        errors = []
+        for domain in self._domain_candidates():
+            data = _get_json(
+                "https://api.vworld.kr/req/data",
+                params={
+                    "service": "data",
+                    "version": "2.0",
+                    "request": "GetFeature",
+                    "key": self.api_key,
+                    "domain": domain,
+                    "format": "json",
+                    "data": data_id,
+                    "geomFilter": f"BOX({min_lon},{min_lat},{max_lon},{max_lat})",
+                    "crs": "EPSG:4326",
+                    "size": size,
+                },
+            )
+            response = data.get("response") or {}
+            if response.get("status") != "ERROR":
+                self.domain = domain
+                return data
             error = response.get("error") or {}
-            raise ApiError(f"VWorld data API failed: {error.get('code', 'ERROR')} - {error.get('text', response)}")
-        return data
+            errors.append(f"{domain}: {error.get('code', 'ERROR')} - {error.get('text', response)}")
+            if error.get("code") != "INCORRECT_KEY":
+                break
+        raise ApiError("VWorld data API failed. " + " | ".join(errors))
+
+    def _domain_candidates(self) -> list[str]:
+        raw_candidates = [
+            self.domain,
+            os.getenv("VWORLD_DOMAIN"),
+            os.getenv("RENDER_EXTERNAL_URL"),
+            _hostname_to_url(os.getenv("RENDER_EXTERNAL_HOSTNAME")),
+            _service_to_render_url(os.getenv("RENDER_SERVICE_NAME")),
+            "https://site-analysis-ai.onrender.com",
+            "http://localhost:8501",
+            "http://127.0.0.1:8501",
+        ]
+        candidates = []
+        seen = set()
+        for raw in raw_candidates:
+            normalized = _normalize_domain(raw)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            candidates.append(normalized)
+        return candidates
+
+    def _default_domain(self) -> str:
+        return (
+            _normalize_domain(os.getenv("RENDER_EXTERNAL_URL"))
+            or _hostname_to_url(os.getenv("RENDER_EXTERNAL_HOSTNAME"))
+            or _service_to_render_url(os.getenv("RENDER_SERVICE_NAME"))
+            or "http://localhost:8501"
+        )
 
     def coord_to_address_and_region(self, lon: float, lat: float) -> tuple[dict[str, Any], dict[str, Any]]:
         if not self.api_key:
@@ -380,6 +416,30 @@ def _bbox_from_radius(lon: float, lat: float, radius_m: int) -> tuple[float, flo
     lat_delta = radius_m / 111_320
     lon_delta = radius_m / (111_320 * max(cos(radians(lat)), 0.01))
     return lon - lon_delta, lat - lat_delta, lon + lon_delta, lat + lat_delta
+
+
+def _normalize_domain(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip().rstrip("/")
+    if not value:
+        return None
+    if not value.startswith(("http://", "https://")):
+        value = f"https://{value}"
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _hostname_to_url(value: str | None) -> str | None:
+    return _normalize_domain(value)
+
+
+def _service_to_render_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    return _normalize_domain(f"https://{value}.onrender.com")
 
 
 def _strip_tags(value: str) -> str:
