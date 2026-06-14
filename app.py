@@ -750,6 +750,9 @@ def main() -> None:
 
             if not places_rows:
                 collection_notes.append("주변 장소: 보조 데이터 소스에서도 결과 없음")
+                collection_notes.append(
+                    "확인 필요: Render 환경변수 VWORLD_API_KEY가 비어 있거나, 브이월드 인증키의 허용 도메인과 VWORLD_DOMAIN이 다르면 장소 검색이 0건으로 표시될 수 있습니다."
+                )
 
             if sgis.enabled:
                 try:
@@ -851,6 +854,11 @@ def main() -> None:
 
     st.divider()
     render_places(places_rows, analysis)
+    if not places_rows:
+        st.warning(
+            "주변 장소가 0건입니다. 사이드바의 데이터 소스 상태와 하단 데이터 수집 로그에서 "
+            "VWORLD_API_KEY, VWORLD_DOMAIN, 카카오 로컬 API 활성화 여부를 확인하세요."
+        )
 
     st.divider()
     render_environment_sections(analysis)

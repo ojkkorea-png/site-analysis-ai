@@ -11,8 +11,11 @@ class ApiError(RuntimeError):
 
 
 def _get_json(url: str, *, headers: dict[str, str] | None = None, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    request_headers = {"User-Agent": "site-analysis-assistant/1.0"}
+    if headers:
+        request_headers.update(headers)
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
+        response = requests.get(url, headers=request_headers, params=params, timeout=15)
     except requests.RequestException as exc:
         raise ApiError(f"Request failed: {exc}") from exc
     if not response.ok:
@@ -222,23 +225,40 @@ class VWorldDataClient:
         min_lon, min_lat, max_lon, max_lat = _bbox_from_radius(lon, lat, radius)
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
+        errors = []
         for keyword in self.PLACE_KEYWORDS.get(category_label, [category_label]):
-            data = _get_json(
-                "https://api.vworld.kr/req/search",
-                params={
-                    "service": "search",
-                    "request": "search",
-                    "version": "2.0",
-                    "crs": "EPSG:4326",
-                    "bbox": f"{min_lon},{min_lat},{max_lon},{max_lat}",
-                    "size": min(size, 10),
-                    "page": 1,
-                    "query": keyword,
-                    "type": "place",
-                    "format": "json",
-                    "key": self.api_key,
-                },
-            )
+            data = None
+            for domain in self._domain_candidates():
+                data = _get_json(
+                    "https://api.vworld.kr/req/search",
+                    params={
+                        "service": "search",
+                        "request": "search",
+                        "version": "2.0",
+                        "crs": "EPSG:4326",
+                        "bbox": f"{min_lon},{min_lat},{max_lon},{max_lat}",
+                        "size": min(size, 10),
+                        "page": 1,
+                        "query": keyword,
+                        "type": "place",
+                        "format": "json",
+                        "key": self.api_key,
+                        "domain": domain,
+                    },
+                )
+                response = data.get("response") or {}
+                if response.get("status") != "ERROR":
+                    self.domain = domain
+                    break
+                error = response.get("error") or {}
+                errors.append(f"{keyword}/{domain}: {error.get('code', 'ERROR')} - {error.get('text', response)}")
+                if error.get("code") != "INCORRECT_KEY":
+                    break
+            if data is None:
+                continue
+            response = data.get("response") or {}
+            if response.get("status") == "ERROR":
+                continue
             items = (((data.get("response") or {}).get("result") or {}).get("items") or [])
             for item in items:
                 item_id = str(item.get("id") or item.get("title") or item)
@@ -268,6 +288,8 @@ class VWorldDataClient:
                     break
             if len(rows) >= size:
                 break
+        if not rows and errors:
+            raise ApiError("VWorld place search failed. " + " | ".join(errors[:4]))
         rows.sort(key=lambda row: int(row["distance"]))
         return {"documents": rows[:size]}
 
