@@ -9,6 +9,8 @@ services:
         value: 3.10.11
       - key: VWORLD_API_KEY
         sync: false
+      - key: VWORLD_DOMAIN
+        sync: false
       - key: SGIS_CONSUMER_KEY
         sync: false
       - key: SGIS_CONSUMER_SECRET
