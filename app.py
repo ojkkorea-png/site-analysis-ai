@@ -854,7 +854,7 @@ def main() -> None:
     st.divider()
     render_spatial_layers(analysis)
 
-    html_report = render_html_report(analysis)
+    html_report = render_html_report(analysis, comparison_rows)
     export_col1, export_col2, export_col3 = st.columns(3)
     with export_col1:
         st.download_button(
@@ -1353,32 +1353,39 @@ def build_comparison_rows(
             candidate_type="기준 대지",
         )
     ]
-    if not vworld.enabled:
-        return rows
-
     candidates = parse_candidate_text(candidate_text)
     if auto_candidates:
-        candidates = merge_candidates(candidates, auto_candidate_suggestions(base_places, auto_candidate_count))
+        candidates = merge_candidates(
+            candidates,
+            auto_candidate_suggestions(
+                base_places,
+                auto_candidate_count,
+                base_lat=base_lat,
+                base_lon=base_lon,
+                radius=radius,
+            ),
+        )
 
     for name, lat, lon in candidates:
         candidate_places: list[dict] = []
         address = "주소 조회 실패"
-        try:
-            address_response, _ = vworld.coord_to_address_and_region(lon, lat)
-            docs = address_response.get("documents") or []
-            if docs:
-                first = docs[0]
-                road = first.get("road_address") or {}
-                jibun = first.get("address") or {}
-                address = road.get("address_name") or jibun.get("address_name") or address
-        except ApiError:
-            pass
-
-        for category in categories:
+        if vworld.enabled:
             try:
-                candidate_places.extend(vworld.place_search(lon, lat, category, radius=radius).get("documents", []))
+                address_response, _ = vworld.coord_to_address_and_region(lon, lat)
+                docs = address_response.get("documents") or []
+                if docs:
+                    first = docs[0]
+                    road = first.get("road_address") or {}
+                    jibun = first.get("address") or {}
+                    address = road.get("address_name") or jibun.get("address_name") or address
             except ApiError:
-                continue
+                pass
+
+            for category in categories:
+                try:
+                    candidate_places.extend(vworld.place_search(lon, lat, category, radius=radius).get("documents", []))
+                except ApiError:
+                    continue
 
         rows.append(
             make_comparison_row(
@@ -1395,7 +1402,14 @@ def build_comparison_rows(
     return rows
 
 
-def auto_candidate_suggestions(places: list[dict], limit: int) -> list[tuple[str, float, float]]:
+def auto_candidate_suggestions(
+    places: list[dict],
+    limit: int,
+    *,
+    base_lat: float,
+    base_lon: float,
+    radius: int,
+) -> list[tuple[str, float, float]]:
     strategy = [
         ("교통 거점 후보", ["대중교통"]),
         ("상권 거점 후보", ["카페", "음식점", "편의점"]),
@@ -1432,7 +1446,32 @@ def auto_candidate_suggestions(places: list[dict], limit: int) -> list[tuple[str
         suggestions.append((f"주변 거점 검토점 ({place_name} 인근)", lat, lon))
         if len(suggestions) >= limit:
             break
+
+    fallback_strategy = [
+        ("북측 생활권 후보", 0),
+        ("동측 가로변 후보", 90),
+        ("남측 생활권 후보", 180),
+        ("서측 가로변 후보", 270),
+        ("북동측 확장 후보", 45),
+    ]
+    fallback_distance = max(120, min(int(radius * 0.65), 450))
+    for label, bearing in fallback_strategy:
+        if len(suggestions) >= limit:
+            break
+        lat, lon = offset_coordinate(base_lat, base_lon, fallback_distance, bearing)
+        key = (round(lat, 5), round(lon, 5))
+        if key in used:
+            continue
+        used.add(key)
+        suggestions.append((f"{label} ({fallback_distance}m)", lat, lon))
     return suggestions
+
+
+def offset_coordinate(lat: float, lon: float, distance_m: int, bearing_deg: float) -> tuple[float, float]:
+    bearing = math.radians(bearing_deg)
+    lat_delta = math.cos(bearing) * distance_m / 111_320
+    lon_delta = math.sin(bearing) * distance_m / (111_320 * max(math.cos(math.radians(lat)), 0.01))
+    return lat + lat_delta, lon + lon_delta
 
 
 def nearest_place_in_categories(places: list[dict], categories: list[str], used: set[tuple[float, float]]) -> dict | None:

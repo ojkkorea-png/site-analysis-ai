@@ -7,7 +7,7 @@ from typing import Any
 from modules.site_analysis import SiteAnalysis
 
 
-def render_html_report(analysis: SiteAnalysis) -> str:
+def render_html_report(analysis: SiteAnalysis, comparison_rows: list[dict[str, Any]] | None = None) -> str:
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     return f"""<!doctype html>
 <html lang="ko">
@@ -67,6 +67,9 @@ def render_html_report(analysis: SiteAnalysis) -> str:
 
   <h2>공간정보 레이어 조회 결과</h2>
   {render_key_value_table(analysis.spatial_layer_counts)}
+
+  <h2>후보지 비교</h2>
+  {render_comparison_table(comparison_rows or [])}
 </body>
 </html>"""
 
@@ -120,6 +123,31 @@ def render_population_table(population: dict[str, Any] | None) -> str:
         for key, label in keys
     )
     return f"<table><thead><tr><th>항목</th><th>값</th></tr></thead><tbody>{rows}</tbody></table>"
+
+
+def render_comparison_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p>후보지 비교 데이터가 없습니다.</p>"
+    columns = [
+        "후보지",
+        "유형",
+        "종합점수",
+        "접근성",
+        "상권성",
+        "문화성",
+        "균형성",
+        "주변장소",
+        "최근접교통",
+        "최근접상권",
+        "최근접문화",
+        "주소",
+        "비교해석",
+    ]
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    body = ""
+    for row in rows:
+        body += "<tr>" + "".join(f"<td>{escape(str(row.get(column, '-')))}</td>" for column in columns) + "</tr>"
+    return f"<table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
 
 
 def render_sun_analysis(analysis: SiteAnalysis) -> str:
