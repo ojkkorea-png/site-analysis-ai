@@ -783,6 +783,8 @@ def main() -> None:
                 auto_candidates=auto_candidates,
                 auto_candidate_count=auto_candidate_count,
                 vworld=vworld,
+                kakao=kakao,
+                osm=osm,
                 categories=selected_categories,
                 radius=radius,
             )
@@ -1338,6 +1340,8 @@ def build_comparison_rows(
     auto_candidates: bool,
     auto_candidate_count: int,
     vworld: VWorldDataClient,
+    kakao: KakaoLocalClient,
+    osm: OpenStreetMapClient,
     categories: list[str],
     radius: int,
 ) -> list[dict]:
@@ -1367,25 +1371,8 @@ def build_comparison_rows(
         )
 
     for name, lat, lon in candidates:
-        candidate_places: list[dict] = []
-        address = "주소 조회 실패"
-        if vworld.enabled:
-            try:
-                address_response, _ = vworld.coord_to_address_and_region(lon, lat)
-                docs = address_response.get("documents") or []
-                if docs:
-                    first = docs[0]
-                    road = first.get("road_address") or {}
-                    jibun = first.get("address") or {}
-                    address = road.get("address_name") or jibun.get("address_name") or address
-            except ApiError:
-                pass
-
-            for category in categories:
-                try:
-                    candidate_places.extend(vworld.place_search(lon, lat, category, radius=radius).get("documents", []))
-                except ApiError:
-                    continue
+        address = resolve_candidate_address(vworld, kakao, osm, lon, lat)
+        candidate_places = collect_candidate_places(vworld, kakao, osm, lon, lat, categories, radius)
 
         rows.append(
             make_comparison_row(
@@ -1400,6 +1387,88 @@ def build_comparison_rows(
             )
         )
     return rows
+
+
+def resolve_candidate_address(
+    vworld: VWorldDataClient,
+    kakao: KakaoLocalClient,
+    osm: OpenStreetMapClient,
+    lon: float,
+    lat: float,
+) -> str:
+    for source in ("vworld", "kakao", "osm"):
+        try:
+            if source == "vworld" and vworld.enabled:
+                address_response, _ = vworld.coord_to_address_and_region(lon, lat)
+            elif source == "kakao" and kakao.enabled:
+                address_response = kakao.coord_to_address(lon, lat)
+            elif source == "osm":
+                address_response, _ = osm.reverse_geocode(lon, lat)
+            else:
+                continue
+            docs = address_response.get("documents") or []
+            if docs:
+                first = docs[0]
+                road = first.get("road_address") or {}
+                jibun = first.get("address") or {}
+                address = road.get("address_name") or jibun.get("address_name") or first.get("address_name")
+                if address:
+                    return address
+        except ApiError:
+            continue
+    return "주소 조회 실패"
+
+
+def collect_candidate_places(
+    vworld: VWorldDataClient,
+    kakao: KakaoLocalClient,
+    osm: OpenStreetMapClient,
+    lon: float,
+    lat: float,
+    categories: list[str],
+    radius: int,
+) -> list[dict]:
+    places: list[dict] = []
+    for category in categories:
+        docs: list[dict] = []
+        if vworld.enabled:
+            try:
+                docs = vworld.place_search(lon, lat, category, radius=radius).get("documents", [])
+            except ApiError:
+                docs = []
+
+        if not docs and kakao.enabled and category in PLACE_CATEGORIES:
+            try:
+                docs = kakao.category_search(lon, lat, PLACE_CATEGORIES[category], radius=radius).get("documents", [])
+                for item in docs:
+                    item["analysis_category"] = category
+            except ApiError:
+                docs = []
+
+        if not docs:
+            try:
+                docs = osm.category_search(lon, lat, category, radius=radius).get("documents", [])
+            except ApiError:
+                docs = []
+
+        places.extend(docs)
+    return dedupe_places(places)
+
+
+def dedupe_places(rows: list[dict]) -> list[dict]:
+    unique: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        key = (
+            str(row.get("analysis_category") or ""),
+            str(row.get("place_name") or row.get("id") or ""),
+            str(row.get("x") or "") + "," + str(row.get("y") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return sorted(unique, key=lambda row: _to_int(row.get("distance"), 999999))
 
 
 def auto_candidate_suggestions(
