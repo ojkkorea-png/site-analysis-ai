@@ -1,7 +1,6 @@
 from datetime import date, datetime
 import math
 import json
-import os
 
 import folium
 import matplotlib.pyplot as plt
@@ -614,6 +613,12 @@ def main() -> None:
     st.title("Site Analysis Assistant")
     st.caption("대한민국 좌표 기반 대지 분석 자료 생성기")
 
+    kakao = KakaoLocalClient()
+    vworld = VWorldDataClient()
+    sgis = SgisClient()
+    meteo = OpenMeteoClient()
+    osm = OpenStreetMapClient()
+
     with st.sidebar:
         st.subheader("대지 입력")
         site_name = st.text_input("프로젝트/대지 이름", value="서울시청 인근 대지")
@@ -641,30 +646,6 @@ def main() -> None:
             placeholder="선택 입력: 후보지 B,37.5700,126.9820\n후보지 C,37.5610,126.9770",
             height=88,
         )
-
-        with st.expander("브이월드 API 직접 입력"):
-            st.caption("배포 환경변수가 잘 적용되지 않을 때 임시로 테스트할 수 있습니다. 입력값은 현재 앱 세션에서만 사용되고 저장되지 않습니다.")
-            vworld_key_input = st.text_input(
-                "브이월드 인증키",
-                value="",
-                type="password",
-                placeholder="비워두면 서버 환경변수 VWORLD_API_KEY 사용",
-            )
-            vworld_domain_input = st.text_input(
-                "브이월드 허용 도메인",
-                value="",
-                placeholder=os.getenv("VWORLD_DOMAIN") or "https://site-analysis-ai.onrender.com",
-            )
-
-        vworld = VWorldDataClient(
-            api_key=vworld_key_input.strip() or None,
-            domain=vworld_domain_input.strip() or None,
-        )
-        kakao = KakaoLocalClient()
-        sgis = SgisClient()
-        meteo = OpenMeteoClient()
-        osm = OpenStreetMapClient()
-
         run = st.button("분석 자료 생성", type="primary")
 
         with st.expander("데이터 소스 상태"):
@@ -709,13 +690,6 @@ def main() -> None:
                     collection_notes.append("주소/행정구역: 카카오 보조 조회 사용")
                 except ApiError as exc:
                     collection_notes.append(f"카카오 주소 보조 조회 실패: {format_api_error(exc)}")
-
-            if not address_response:
-                try:
-                    address_response, region_response = osm.reverse_geocode(lon, lat)
-                    collection_notes.append("주소/행정구역: OpenStreetMap 보조 조회 사용")
-                except ApiError as exc:
-                    collection_notes.append(f"OpenStreetMap 주소 보조 조회 실패: {exc}")
 
             for label in selected_categories:
                 docs: list[dict] = []
@@ -769,9 +743,6 @@ def main() -> None:
 
             if not places_rows:
                 collection_notes.append("주변 장소: 보조 데이터 소스에서도 결과 없음")
-                collection_notes.append(
-                    "확인 필요: Render 환경변수 VWORLD_API_KEY가 비어 있거나, 브이월드 인증키의 허용 도메인과 VWORLD_DOMAIN이 다르면 장소 검색이 0건으로 표시될 수 있습니다."
-                )
 
             if sgis.enabled:
                 try:
@@ -873,11 +844,6 @@ def main() -> None:
 
     st.divider()
     render_places(places_rows, analysis)
-    if not places_rows:
-        st.warning(
-            "주변 장소가 0건입니다. 사이드바의 데이터 소스 상태와 하단 데이터 수집 로그에서 "
-            "VWORLD_API_KEY, VWORLD_DOMAIN, 카카오 로컬 API 활성화 여부를 확인하세요."
-        )
 
     st.divider()
     render_environment_sections(analysis)
