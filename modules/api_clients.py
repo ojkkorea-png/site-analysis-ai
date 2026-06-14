@@ -291,7 +291,7 @@ class OpenStreetMapClient:
     def reverse_geocode(self, lon: float, lat: float) -> tuple[dict[str, Any], dict[str, Any]]:
         data = _get_json(
             "https://nominatim.openstreetmap.org/reverse",
-            headers={"User-Agent": "site-analysis-ai/1.0"},
+            headers={"User-Agent": "site-analysis-assistant/1.0"},
             params={
                 "format": "jsonv2",
                 "lat": lat,

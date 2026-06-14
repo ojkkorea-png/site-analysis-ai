@@ -608,9 +608,9 @@ def render_environment_sections(analysis) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="AI Site Analysis Assistant", layout="wide")
+    st.set_page_config(page_title="Site Analysis Assistant", layout="wide")
     inject_styles()
-    st.title("AI Site Analysis Assistant")
+    st.title("Site Analysis Assistant")
     st.caption("대한민국 좌표 기반 대지 분석 자료 생성기")
 
     kakao = KakaoLocalClient()

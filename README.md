@@ -1,4 +1,4 @@
-# AI Site Analysis Assistant
+# Site Analysis Assistant
 
 대한민국 좌표를 입력하면 브이월드 공간정보를 중심으로 주소, 행정구역, 주변 장소, 인구 통계, 일조, 기후 데이터를 수집하고 실내건축 설계 초기 단계에 사용할 수 있는 대지 분석 보고서를 생성하는 Streamlit 프로토타입입니다.
 
